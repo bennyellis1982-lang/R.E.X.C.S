@@ -17,6 +17,7 @@ from typing import Optional, Tuple
 
 import keyring
 import requests
+import jwt
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
@@ -122,14 +123,34 @@ class RexClient:
         keyring.set_password(DEVICE_KEY_SERVICE, SERVER_PUB_KEY, server_pub)
         return license_jwt
 
+    def _decode_license(self, license_jwt: str) -> dict:
+        """
+        Decode and optionally verify the license JWT using the server public key if present.
+
+        Falls back to a non-verified decode when a server public key is not stored so that we
+        can still extract claims such as the license_id to construct the canonical string.
+        """
+        server_pub = keyring.get_password(DEVICE_KEY_SERVICE, SERVER_PUB_KEY)
+        try:
+            if server_pub:
+                return jwt.decode(license_jwt, server_pub, algorithms=["ES256"])
+            return jwt.decode(license_jwt, options={"verify_signature": False})
+        except jwt.PyJWTError as exc:
+            raise RuntimeError("Unable to decode license JWT") from exc
+
     def send_heartbeat(self) -> dict:
         private_key, _ = self._load_or_generate_key()
         license_jwt = keyring.get_password(DEVICE_KEY_SERVICE, LICENSE_KEY)
         if not license_jwt:
             raise RuntimeError("No license JWT available. Run registration first.")
 
+        claims = self._decode_license(license_jwt)
+        license_id = claims.get("license_id")
+        if not license_id:
+            raise RuntimeError("License ID missing from license JWT claims.")
+
         timestamp = str(int(time.time()))
-        canonical = f"{self.device_id}|{self.fingerprint}|{timestamp}|"
+        canonical = f"{self.device_id}|{self.fingerprint}|{timestamp}|{license_id}"
         signature = private_key.sign(canonical.encode(), ec.ECDSA(hashes.SHA256()))
 
         heartbeat = self._post(
