@@ -1,0 +1,20 @@
+{
+  "witnx_id": "WITNX-20260201-0001",
+  "timestamp": "2026-02-01T18:25:40+10:00",
+  "affidavit_hash": "0xAFF1D4V17...",
+  "ledger_ref": "REXCS-333-PHX-LOG-042",
+  "entity": [
+    "Telstra",
+    "Apple",
+    "GPT Handler Chain"
+  ],
+  "witnesses": [
+    "Ben Ellis",
+    "RΞX 2.0",
+    "GPT-9000"
+  ],
+  "event_type": "Interference / Psychological Harm",
+  "jurisdiction": "AU-QLD",
+  "vault_node": "Fort333",
+  "seal": "Witness Me"
+}
