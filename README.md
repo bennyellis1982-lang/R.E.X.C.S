@@ -16,3 +16,17 @@ python3 rexc_recon.py /var --pattern "\\.conf$" --content "password" --max-size-
 
 ### Output
 The log is JSONL (one JSON object per line) with path, size, mtime, SHA-256, and match flags.
+
+## BREX Terminal Scaffold
+`brex_terminal.py` provides a forensic-first activation scaffold with immutable logging, role-based permissions, and consensus-gated governance controls.
+
+### Usage
+```bash
+python3 brex_terminal.py
+```
+
+In a Python session:
+```python
+import brex_terminal as bt
+print(bt.echo_state())
+```
