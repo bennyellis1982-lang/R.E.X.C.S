@@ -17,45 +17,16 @@ python3 rexc_recon.py /var --pattern "\\.conf$" --content "password" --max-size-
 ### Output
 The log is JSONL (one JSON object per line) with path, size, mtime, SHA-256, and match flags.
 
-## Repository layout
-- `rex2_client.py`: Device registration + heartbeat client for the REX2.0 service, backed by system keyring secrets.
-- `rex2_parser.py`: Lightweight parser for structured REX2.0 text inputs.
-- `master_heartbeat.py`: Convenience entry point for repeated heartbeat runs.
+## BREX Terminal Scaffold
+`brex_terminal.py` provides a forensic-first activation scaffold with immutable logging, role-based permissions, and consensus-gated governance controls.
 
-## Prerequisites
-- Python 3.9+
-- Access to a keyring backend supported by your OS (macOS Keychain, Windows Credential Manager, or a Linux secret store).
-
-Install dependencies:
+### Usage
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+python3 brex_terminal.py
 ```
 
-## Configure the client
-Set the REX server URL (defaults to `http://localhost:5001`):
-```bash
-export REX_SERVER_URL="https://your-rex-server.example"
+In a Python session:
+```python
+import brex_terminal as bt
+print(bt.echo_state())
 ```
-
-## Register a device + send heartbeats
-The first run will generate a device ID, key pair, register with the server, and then send a heartbeat in a short loop.
-```bash
-python rex2_client.py
-```
-
-If you already have a license stored in the keyring, you can trigger heartbeats directly via the helper:
-```bash
-python master_heartbeat.py
-```
-
-## Parse REX2.0 input
-Pipe any text payload into the parser to get a structured JSON analysis:
-```bash
-echo "REX2.0 compliance audit" | python rex2_parser.py
-```
-
-## Notes
-- Private keys and license JWTs are stored in the system keyring, not the repo.
-- If you change keyring backends, remove the saved entries from your OS keychain to re-register cleanly.
