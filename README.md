@@ -30,3 +30,20 @@ In a Python session:
 import brex_terminal as bt
 print(bt.echo_state())
 ```
+
+## BWC/DVD Batch Manifest Utility
+`tools/bwc_dvd_batcher.py` scans a body-worn camera (BWC) or DVD evidence folder and groups files into size-limited batches for processing/transcription pipelines.
+
+### Usage
+```bash
+python3 tools/bwc_dvd_batcher.py /path/to/bwc_dvd --target-gb 3.5
+```
+
+Include all file types (not only common video formats):
+```bash
+python3 tools/bwc_dvd_batcher.py /path/to/bwc_dvd --target-gb 2.0 --include-all-files
+```
+
+This generates:
+- `bwc_batch_manifest.json`
+- `bwc_batch_manifest.csv`
