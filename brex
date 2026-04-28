@@ -1,0 +1,450 @@
+#!/bin/zsh
+# BREX Terminal v1.2 (local, evidence-first, append-only)
+# Fixes: removes eval, makes writes/paths/CSV safe, keeps v1.1 features intact.
+
+set -euo pipefail
+
+BREX_VERSION="1.2"
+DEFAULT_VAULT="MASTER_VAULT_333"
+DEFAULT_OPERATOR="Ben Ellis"
+DEFAULT_TZ="Australia/Brisbane"
+
+usage() {
+cat <<'EOF2'
+BREX TERMINAL /
+Version: 1.2
+Mode: cold_log (default)
+
+USAGE:
+  brex status
+  brex init --vault MASTER_VAULT_333
+  brex case new CASE-ID --vault MASTER_VAULT_333
+
+  brex ingest hash /path/to/file
+  brex ingest add  /path/to/file --case CASE-ID --event EVT-ID --vault MASTER_VAULT_333 [--dry-run]
+  brex ingest seal --case CASE-ID --evidence EVI-0001 --vault MASTER_VAULT_333 [--dry-run]
+
+  brex evidence index --case CASE-ID --vault MASTER_VAULT_333
+
+  brex custody add --case CASE-ID --evidence EVID-ID --action ACTION --note "text" --vault MASTER_VAULT_333 [--dry-run]
+  brex verify custodyhash --case CASE-ID --vault MASTER_VAULT_333
+
+  brex timeline add --case CASE-ID --event EVT-ID --line "YYYY-MM-DD|EVT|label|loc|channel|impact|tags|evidence_ids" --vault MASTER_VAULT_333 [--dry-run]
+
+  brex consent add --case CASE-ID --with "Name/Org" --method email --what "BUNDLE/EXHIBITS" --purpose "review" --vault MASTER_VAULT_333 [--dry-run]
+
+  brex bundle build --case CASE-ID --bundle BUNDLE-ID --src /path/to/folder --vault MASTER_VAULT_333 [--dry-run]
+  brex bundle list --vault MASTER_VAULT_333
+
+EXIT:
+  brex exit
+
+NOTES:
+- Originals are never edited. Quarantine first, then seal into Originals.
+- CSV logs are append-only. Custody hash-chain is stored in CHAIN_OF_CUSTODY_HASHCHAIN.txt
+EOF2
+}
+
+say() { print -r -- "$@"; }
+die() { say "ERROR: $*"; exit 1; }
+
+arg_val() { local flag="$1"; shift
+  while (( $# )); do
+    if [[ "$1" == "$flag" ]]; then shift
+      [[ $# -gt 0 ]] || die "Missing value for $flag"
+      echo "$1"; return 0
+    fi
+    shift
+  done
+  return 1
+}
+
+has_flag() { local flag="$1"; shift
+  while (( $# )); do [[ "$1" == "$flag" ]] && return 0; shift; done
+  return 1
+}
+
+csv_escape() {
+  # RFC4180-ish: wrap in quotes, double internal quotes
+  local s="$1"
+  s="${s//\"/\"\"}"
+  printf "\"%s\"" "$s"
+}
+
+ensure_vault() { local vault="$1"
+  [[ -d "$vault" ]] || die "Vault not found: $vault (run: brex init --vault $vault)"
+}
+
+sha256_file() { local f="$1"; shasum -a 256 "$f" | awk '{print $1}' }
+sha256_str()  { local s="$1"; print -n -- "$s" | shasum -a 256 | awk '{print $1}' }
+bytes_file()  { local f="$1"; stat -f%z "$f" }
+now_aest()    { TZ="$DEFAULT_TZ" date "+%Y-%m-%dT%H:%M:%S%z" }
+
+append_line() {
+  # append_line <dry> <file> <line>
+  local dry="$1" file="$2" line="$3"
+  if [[ "$dry" == "1" ]]; then
+    say "DRY-RUN: append to $file"
+    say "DRY-RUN: $line"
+  else
+    printf '%s\n' "$line" >> "$file"
+  fi
+}
+
+init_vault() {
+  local vault="$1"
+  mkdir -p "$vault"/{00_README,01_CASES,02_OPERATIONS/{TEMPLATES,RUNBOOKS,CHECKLISTS,SCRIPTS_READONLY,PRINTER,ROUTER},03_NODES/{NODE_LOGS,NODE_EXPORTS},04_BUNDLES_EXPORT,05_ARCHIVE_LOCKED,06_INBOX_QUARANTINE}
+  say "OK: Vault initialized at $vault"
+}
+
+new_case() {
+  local case_id="$1" vault="$2"
+  ensure_vault "$vault"
+  local base="$vault/01_CASES/$case_id"
+  mkdir -p "$base"/{00_CASE_ADMIN,01_INTAKE,02_EVIDENCE_ORIGINALS,03_EVIDENCE_WORKING,04_CUSTODY_LOGS,05_TIMELINE,06_REPORTS_EXPORT,07_SYSTEM_LOGS,08_CONSENT_AND_SHARING,09_PRINT_COPIES_INDEX}
+
+  [[ -f "$base/01_INTAKE/EVIDENCE_INDEX.csv" ]] || printf '%s\n' "exhibit_id,evidence_id,event_id,date_captured,original_filename,file_type,sha256,size_bytes,location,short_description,relevance,notes" > "$base/01_INTAKE/EVIDENCE_INDEX.csv"
+  [[ -f "$base/04_CUSTODY_LOGS/CHAIN_OF_CUSTODY.csv" ]] || printf '%s\n' "coc_id,timestamp,evidence_id,action,by_whom,from_whom,to_whom,location,seal_status,notes" > "$base/04_CUSTODY_LOGS/CHAIN_OF_CUSTODY.csv"
+  [[ -f "$base/04_CUSTODY_LOGS/CHAIN_OF_CUSTODY_HASHCHAIN.txt" ]] || printf '%s\n' "GENESIS" > "$base/04_CUSTODY_LOGS/CHAIN_OF_CUSTODY_HASHCHAIN.txt"
+  [[ -f "$base/08_CONSENT_AND_SHARING/CONSENT_LOG.csv" ]] || printf '%s\n' "consent_id,timestamp,shared_with,method,what_shared,purpose,restrictions,operator_confirmation,notes" > "$base/08_CONSENT_AND_SHARING/CONSENT_LOG.csv"
+  [[ -f "$base/05_TIMELINE/CASE_TIMELINE.txt" ]] || printf '%s\n' "CASE TIMELINE | $case_id" > "$base/05_TIMELINE/CASE_TIMELINE.txt"
+
+  say "OK: Case created $case_id"
+}
+
+brex_status() {
+  say "BREX TERMINAL /"
+  say "Version: $BREX_VERSION"
+  say "Mode: cold_log (default)"
+  say "Vault (default): $(pwd)/$DEFAULT_VAULT"
+}
+
+ingest_hash() {
+  local f="$1"
+  [[ -f "$f" ]] || die "File not found: $f"
+  local h b
+  h="$(sha256_file "$f")"
+  b="$(bytes_file "$f")"
+  say "sha256: $h"
+  say "bytes:  $b"
+}
+
+custody_hashchain_append() {
+  local case_id="$1" vault="$2" line="$3" dry="$4"
+  local hlog="$vault/01_CASES/$case_id/04_CUSTODY_LOGS/CHAIN_OF_CUSTODY_HASHCHAIN.txt"
+  [[ -f "$hlog" ]] || die "Missing hashchain log: $hlog"
+  local prev
+  prev="$(tail -n 1 "$hlog")"
+  local entry_hash
+  entry_hash="$(sha256_str "${line}|${prev}")"
+  append_line "$dry" "$hlog" "$entry_hash"
+}
+
+custody_add() {
+  local case_id="$1" vault="$2" evidence_id="$3" action="$4" note="$5" dry="$6"
+  ensure_vault "$vault"
+  local log="$vault/01_CASES/$case_id/04_CUSTODY_LOGS/CHAIN_OF_CUSTODY.csv"
+  [[ -f "$log" ]] || die "Custody log missing: $log"
+
+  local n coc_id ts
+  n=$(($(tail -n +2 "$log" | wc -l | tr -d ' ') + 1))
+  coc_id=$(printf "COC-%04d" "$n")
+  ts="$(now_aest)"
+
+  local by="$DEFAULT_OPERATOR"
+  local from="$DEFAULT_OPERATOR"
+  local to="$vault"
+  local loc="$vault/01_CASES/$case_id"
+  local seal="na"
+
+  local row
+  row="$coc_id,$ts,$evidence_id,$action,$(csv_escape "$by"),$(csv_escape "$from"),$(csv_escape "$to"),$(csv_escape "$loc"),$seal,$(csv_escape "$note")"
+
+  append_line "$dry" "$log" "$row"
+  custody_hashchain_append "$case_id" "$vault" "$row" "$dry"
+  say "OK: Custody appended $coc_id"
+}
+
+ingest_add() {
+  local f="$1" case_id="$2" event_id="$3" vault="$4" dry="$5"
+  ensure_vault "$vault"
+  [[ -f "$f" ]] || die "File not found: $f"
+  local base="$vault/01_CASES/$case_id"
+  [[ -d "$base" ]] || die "Case not found: $base (run: brex case new $case_id)"
+
+  local h b ts idx count evidence_id fname qdir qpath
+  h="$(sha256_file "$f")"
+  b="$(bytes_file "$f")"
+  ts="$(now_aest)"
+
+  idx="$base/01_INTAKE/EVIDENCE_INDEX.csv"
+  count=$(($(tail -n +2 "$idx" | wc -l | tr -d ' ') + 1))
+  evidence_id=$(printf "EVI-%04d" "$count")
+
+  qdir="$vault/06_INBOX_QUARANTINE"
+  fname="$(basename "$f")"
+  qpath="$qdir/$evidence_id--$fname"
+
+  if [[ "$dry" == "1" ]]; then
+    say "DRY-RUN: mkdir -p $qdir"
+    say "DRY-RUN: cp -p '$f' '$qpath'"
+  else
+    mkdir -p "$qdir"
+    cp -p "$f" "$qpath"
+  fi
+
+  local row
+  row=",$evidence_id,$event_id,$ts,$(csv_escape "$fname"),$(csv_escape "${fname##*.}"),$h,$b,$(csv_escape "06_INBOX_QUARANTINE/"),,,\"QUARANTINED\""
+  append_line "$dry" "$idx" "$row"
+
+  custody_add "$case_id" "$vault" "$evidence_id" "added"  "Ingested to quarantine as $qpath" "$dry"
+  custody_add "$case_id" "$vault" "$evidence_id" "hashed" "SHA256=$h BYTES=$b" "$dry"
+
+  say "OK: Ingested QUARANTINED"
+  say "evidence_id: $evidence_id"
+  say "sha256: $h"
+  say "stored: $qpath"
+}
+
+ingest_seal() {
+  local case_id="$1" evidence_id="$2" vault="$3" dry="$4"
+  ensure_vault "$vault"
+  local base="$vault/01_CASES/$case_id"
+  [[ -d "$base" ]] || die "Case not found: $base"
+
+  local qdir="$vault/06_INBOX_QUARANTINE"
+  local odir="$base/02_EVIDENCE_ORIGINALS"
+  if [[ "$dry" != "1" ]]; then mkdir -p "$odir"; fi
+
+  local match
+  match="$(ls "$qdir"/"$evidence_id"--* 2>/dev/null | head -n 1 || true)"
+  [[ -n "$match" ]] || die "No quarantined file found for $evidence_id in $qdir"
+
+  local dest="$odir/$(basename "$match")"
+  if [[ "$dry" == "1" ]]; then
+    say "DRY-RUN: mv '$match' '$dest'"
+  else
+    mkdir -p "$odir"
+    mv "$match" "$dest"
+  fi
+
+  custody_add "$case_id" "$vault" "$evidence_id" "moved"  "Moved from quarantine to originals: $dest" "$dry"
+  custody_add "$case_id" "$vault" "$evidence_id" "sealed" "Sealed original in 02_EVIDENCE_ORIGINALS" "$dry"
+
+  say "OK: Sealed into Originals"
+  say "path: $dest"
+}
+
+evidence_index() {
+  local case_id="$1" vault="$2"
+  ensure_vault "$vault"
+  local idx="$vault/01_CASES/$case_id/01_INTAKE/EVIDENCE_INDEX.csv"
+  [[ -f "$idx" ]] || die "Missing evidence index: $idx"
+  cat "$idx"
+}
+
+timeline_add() {
+  local case_id="$1" event_id="$2" line="$3" vault="$4" dry="$5"
+  ensure_vault "$vault"
+  local tfile="$vault/01_CASES/$case_id/05_TIMELINE/CASE_TIMELINE.txt"
+  [[ -f "$tfile" ]] || die "Timeline missing: $tfile"
+  # Timeline is plain text; do not CSV-escape it.
+  append_line "$dry" "$tfile" "$line"
+  say "OK: Timeline appended for $event_id"
+}
+
+consent_add() {
+  local case_id="$1" who="$2" method="$3" what="$4" purpose="$5" vault="$6" dry="$7"
+  ensure_vault "$vault"
+  local clog="$vault/01_CASES/$case_id/08_CONSENT_AND_SHARING/CONSENT_LOG.csv"
+  [[ -f "$clog" ]] || die "Consent log missing: $clog"
+
+  local n cid ts
+  n=$(($(tail -n +2 "$clog" | wc -l | tr -d ' ') + 1))
+  cid=$(printf "CON-%04d" "$n")
+  ts="$(now_aest)"
+
+  local row
+  row="$cid,$ts,$(csv_escape "$who"),$method,$(csv_escape "$what"),$(csv_escape "$purpose"),$(csv_escape "No redistribution"),YES,$(csv_escape "")"
+  append_line "$dry" "$clog" "$row"
+  say "OK: Consent appended $cid"
+}
+
+bundle_build() {
+  local case_id="$1" bundle_id="$2" src="$3" vault="$4" dry="$5"
+  ensure_vault "$vault"
+  [[ -d "$src" ]] || die "Bundle source folder not found: $src"
+
+  local outdir="$vault/04_BUNDLES_EXPORT/$bundle_id"
+  if [[ "$dry" == "1" ]]; then
+    say "DRY-RUN: mkdir -p $outdir"
+    say "DRY-RUN: rsync -a --exclude '*.DS_Store' '$src/' '$outdir/'"
+  else
+    mkdir -p "$outdir"
+    rsync -a --exclude "*.DS_Store" "$src"/ "$outdir"/
+  fi
+
+  local manifest="$outdir/HASH_MANIFEST.txt"
+  if [[ "$dry" == "1" ]]; then
+    say "DRY-RUN: generate $manifest"
+  else
+    (cd "$outdir" && find . -type f ! -name "HASH_MANIFEST.txt" -print0 | sort -z | xargs -0 shasum -a 256) > "$manifest"
+  fi
+
+  local zpath="$vault/04_BUNDLES_EXPORT/$bundle_id.zip"
+  if [[ "$dry" == "1" ]]; then
+    say "DRY-RUN: zip -r '$zpath' '$outdir'"
+  else
+    (cd "$vault/04_BUNDLES_EXPORT" && zip -r "$bundle_id.zip" "$bundle_id" >/dev/null)
+  fi
+
+  local zh
+  zh="$(sha256_file "$zpath")"
+  say "OK: Bundle built"
+  say "zip: $zpath"
+  say "sha256(zip): $zh"
+
+  custody_add "$case_id" "$vault" "$bundle_id" "exported" "Bundle zip created: $zpath SHA256=$zh" "$dry"
+}
+
+bundle_list() {
+  local vault="$1"
+  ensure_vault "$vault"
+  ls -lah "$vault/04_BUNDLES_EXPORT"
+}
+
+verify_custodyhash() {
+  local case_id="$1" vault="$2"
+  ensure_vault "$vault"
+  local log="$vault/01_CASES/$case_id/04_CUSTODY_LOGS/CHAIN_OF_CUSTODY.csv"
+  local hlog="$vault/01_CASES/$case_id/04_CUSTODY_LOGS/CHAIN_OF_CUSTODY_HASHCHAIN.txt"
+  [[ -f "$log" ]] || die "Custody log missing: $log"
+  [[ -f "$hlog" ]] || die "Hashchain log missing: $hlog"
+
+  local prev="GENESIS"
+  local i=0
+
+  while IFS= read -r row; do
+    ((i=i+1))
+    local expect actual
+    expect="$(sha256_str "${row}|${prev}")"
+    actual="$(sed -n "$((i+1))p" "$hlog")"  # line1=GENESIS; line2=entry1
+    if [[ "$expect" != "$actual" ]]; then
+      say "FAIL: custody hash mismatch at entry $i"
+      say "expected: $expect"
+      say "actual:   $actual"
+      exit 1
+    fi
+    prev="$actual"
+  done < <(tail -n +2 "$log")
+
+  say "OK: custody hash-chain verified ($i entries)"
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  ""|help|-h|--help) usage ;;
+  status) brex_status ;;
+  init)
+    vault="$(arg_val --vault "$@" || echo "$DEFAULT_VAULT")"
+    init_vault "$vault"
+    ;;
+  case)
+    sub="${1:-}"; shift || true
+    [[ "$sub" == "new" ]] || die "Unknown case command (use: brex case new CASE-ID)"
+    case_id="${1:-}"; [[ -n "$case_id" ]] || die "Missing CASE-ID"
+    shift || true
+    vault="$(arg_val --vault "$@" || echo "$DEFAULT_VAULT")"
+    new_case "$case_id" "$vault"
+    ;;
+  ingest)
+    sub="${1:-}"; shift || true
+    if [[ "$sub" == "hash" ]]; then
+      f="${1:-}"; [[ -n "$f" ]] || die "Missing file path"
+      ingest_hash "$f"
+    elif [[ "$sub" == "add" ]]; then
+      f="${1:-}"; [[ -n "$f" ]] || die "Missing file path"
+      shift || true
+      dry="0"; has_flag --dry-run "$@" && dry="1"
+      case_id="$(arg_val --case "$@" || die "Missing --case CASE-ID")"
+      event_id="$(arg_val --event "$@" || die "Missing --event EVT-ID")"
+      vault="$(arg_val --vault "$@" || echo "$DEFAULT_VAULT")"
+      ingest_add "$f" "$case_id" "$event_id" "$vault" "$dry"
+    elif [[ "$sub" == "seal" ]]; then
+      dry="0"; has_flag --dry-run "$@" && dry="1"
+      case_id="$(arg_val --case "$@" || die "Missing --case CASE-ID")"
+      evidence_id="$(arg_val --evidence "$@" || die "Missing --evidence EVID-ID")"
+      vault="$(arg_val --vault "$@" || echo "$DEFAULT_VAULT")"
+      ingest_seal "$case_id" "$evidence_id" "$vault" "$dry"
+    else
+      die "Unknown ingest command (use: brex ingest hash|add|seal)"
+    fi
+    ;;
+  evidence)
+    sub="${1:-}"; shift || true
+    [[ "$sub" == "index" ]] || die "Unknown evidence command (use: brex evidence index ...)"
+    case_id="$(arg_val --case "$@" || die "Missing --case CASE-ID")"
+    vault="$(arg_val --vault "$@" || echo "$DEFAULT_VAULT")"
+    evidence_index "$case_id" "$vault"
+    ;;
+  custody)
+    sub="${1:-}"; shift || true
+    [[ "$sub" == "add" ]] || die "Unknown custody command (use: brex custody add ...)"
+    dry="0"; has_flag --dry-run "$@" && dry="1"
+    case_id="$(arg_val --case "$@" || die "Missing --case CASE-ID")"
+    evidence_id="$(arg_val --evidence "$@" || die "Missing --evidence EVID-ID")"
+    action="$(arg_val --action "$@" || die "Missing --action ACTION")"
+    note="$(arg_val --note "$@" || echo "")"
+    vault="$(arg_val --vault "$@" || echo "$DEFAULT_VAULT")"
+    custody_add "$case_id" "$vault" "$evidence_id" "$action" "$note" "$dry"
+    ;;
+  verify)
+    sub="${1:-}"; shift || true
+    [[ "$sub" == "custodyhash" ]] || die "Unknown verify command (use: brex verify custodyhash ...)"
+    case_id="$(arg_val --case "$@" || die "Missing --case CASE-ID")"
+    vault="$(arg_val --vault "$@" || echo "$DEFAULT_VAULT")"
+    verify_custodyhash "$case_id" "$vault"
+    ;;
+  timeline)
+    sub="${1:-}"; shift || true
+    [[ "$sub" == "add" ]] || die "Unknown timeline command (use: brex timeline add ...)"
+    dry="0"; has_flag --dry-run "$@" && dry="1"
+    case_id="$(arg_val --case "$@" || die "Missing --case CASE-ID")"
+    event_id="$(arg_val --event "$@" || die "Missing --event EVT-ID")"
+    line="$(arg_val --line "$@" || die "Missing --line '...'")"
+    vault="$(arg_val --vault "$@" || echo "$DEFAULT_VAULT")"
+    timeline_add "$case_id" "$event_id" "$line" "$vault" "$dry"
+    ;;
+  consent)
+    sub="${1:-}"; shift || true
+    [[ "$sub" == "add" ]] || die "Unknown consent command (use: brex consent add ...)"
+    dry="0"; has_flag --dry-run "$@" && dry="1"
+    case_id="$(arg_val --case "$@" || die "Missing --case CASE-ID")"
+    who="$(arg_val --with "$@" || die "Missing --with 'Name/Org'")"
+    method="$(arg_val --method "$@" || die "Missing --method email/in_person/upload")"
+    what="$(arg_val --what "$@" || die "Missing --what 'bundle/exhibits'")"
+    purpose="$(arg_val --purpose "$@" || die "Missing --purpose 'review'")"
+    vault="$(arg_val --vault "$@" || echo "$DEFAULT_VAULT")"
+    consent_add "$case_id" "$who" "$method" "$what" "$purpose" "$vault" "$dry"
+    ;;
+  bundle)
+    sub="${1:-}"; shift || true
+    if [[ "$sub" == "build" ]]; then
+      dry="0"; has_flag --dry-run "$@" && dry="1"
+      case_id="$(arg_val --case "$@" || die "Missing --case CASE-ID")"
+      bundle_id="$(arg_val --bundle "$@" || die "Missing --bundle BUNDLE-ID")"
+      src="$(arg_val --src "$@" || die "Missing --src /path/to/folder")"
+      vault="$(arg_val --vault "$@" || echo "$DEFAULT_VAULT")"
+      bundle_build "$case_id" "$bundle_id" "$src" "$vault" "$dry"
+    elif [[ "$sub" == "list" ]]; then
+      vault="$(arg_val --vault "$@" || echo "$DEFAULT_VAULT")"
+      bundle_list "$vault"
+    else
+      die "Unknown bundle command (use: brex bundle build|list)"
+    fi
+    ;;
+  exit) exit 0 ;;
+  *) die "Unknown command: $cmd (run: brex help)" ;;
+esac
