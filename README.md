@@ -16,3 +16,6 @@ python3 rexc_recon.py /var --pattern "\\.conf$" --content "password" --max-size-
 
 ### Output
 The log is JSONL (one JSON object per line) with path, size, mtime, SHA-256, and match flags.
+
+## Prompting Playbook
+See `docs/T2_COMMAND_STYLES.md` for reusable T2 mode templates (LEGAL, EVIDENCE, SYS, EMAIL, STORY).
