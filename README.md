@@ -32,18 +32,29 @@ print(bt.echo_state())
 ```
 
 ## BWC/DVD Batch Manifest Utility
-`tools/bwc_dvd_batcher.py` scans a body-worn camera (BWC) or DVD evidence folder and groups files into size-limited batches for processing/transcription pipelines.
+`tools/bwc_dvd_batcher.py` scans a body-worn camera (BWC) or DVD evidence folder and greedily groups files into deterministic size-bounded batches for downstream processing, transcription, review, and forensic automation.
 
 ### Usage
 ```bash
 python3 tools/bwc_dvd_batcher.py /path/to/bwc_dvd --target-gb 3.5
 ```
 
-Include all file types (not only common video formats):
+Include all file types in mixed evidence dumps:
 ```bash
-python3 tools/bwc_dvd_batcher.py /path/to/bwc_dvd --target-gb 2.0 --include-all-files
+python3 tools/bwc_dvd_batcher.py /path/to/evidence_dump --target-gb 3.5 --include-all-files
 ```
 
-This generates:
-- `bwc_batch_manifest.json`
-- `bwc_batch_manifest.csv`
+Write JSON and CSV manifests:
+```bash
+python3 tools/bwc_dvd_batcher.py /path/to/bwc_dvd \
+  --target-gb 3.5 \
+  --json-out batches.json \
+  --csv-out batches.csv
+```
+
+Notes:
+- Default mode includes common forensic video formats only.
+- `--include-all-files` includes every regular file recursively.
+- Files are sorted deterministically by relative path before batching.
+- Oversized single files are safely placed into their own batch.
+- Source evidence files are never modified.
