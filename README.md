@@ -16,3 +16,7 @@ python3 rexc_recon.py /var --pattern "\\.conf$" --content "password" --max-size-
 
 ### Output
 The log is JSONL (one JSON object per line) with path, size, mtime, SHA-256, and match flags.
+
+## Evidence and Protocol Docs
+- `docs/TIMELINE_2025-07_TO_PRESENT.md` provides the REX Timeline Hunter month-by-month reconstruction and solicitor evidence-gap checklist.
+- `docs/WORKFLOW_PROTOCOL_REGISTRY.md` maps repository workflows and defines the PPPE / EEEP / BBBB immutable protocol stack for evidence preservation and legal-readiness review.
