@@ -11,3 +11,7 @@ ENV/
 
 # Local frontend dependencies
 node_modules/
+
+# Local minted-system state and generated investor packs
+REX_MINTED_SYSTEM/
+REX_INVESTOR_PACK_*/
