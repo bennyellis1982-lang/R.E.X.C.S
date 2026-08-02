@@ -75,3 +75,22 @@ Example dry run for the current repository:
 python3 tools/rex_master_vault_333.py . --vault-root /tmp/REX_MASTER_VAULT_333 --dry-run
 ```
 
+## REX Six-Decimal Minted System
+
+`tools/rex_minted_system.py` provides an offline fixed-point reference ledger for six-decimal units. It stores every amount as integer micro-units, requires explicit authorization for each mint, pins the supply cap into the policy and genesis record, prevents duplicate mutations with idempotency keys, and verifies a SHA-256 hash chain from genesis to the current ledger head.
+
+It can also generate an internal, prepare-only investor-readiness package with a verified allocation register, source hashes, explicit unknowns, Australian pre-launch control gates, and dotted approval lines. It does not create a blockchain, wallet, exchange, token sale, valuation, or claim of investor demand.
+
+```bash
+python3 tools/rex_minted_system.py init \
+  --state-dir /secure/working/REX_MINTED_SYSTEM \
+  --name "REX Minted Unit" \
+  --symbol REXM \
+  --issuer REX-OPERATOR \
+  --max-supply 1000000.000000
+
+python3 tools/rex_minted_system.py verify \
+  --state-dir /secure/working/REX_MINTED_SYSTEM
+```
+
+See [`docs/REX_MINTED_SYSTEM.md`](docs/REX_MINTED_SYSTEM.md) for mint authorization, verification, investor-pack generation, limitations, and regulatory gates.
