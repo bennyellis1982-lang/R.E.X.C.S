@@ -9,5 +9,10 @@ venv/
 env/
 ENV/
 
+# Local environment/secrets
+.env
+.env.*
+!.env.example
+
 # Local frontend dependencies
 node_modules/
