@@ -1,0 +1,45 @@
+{
+  "conversation_id": "chatgpt-uuid",
+  "source": "chatgpt.com",
+  "export_batch_id": "2026-07-07T08:40:00Z",
+  "title": "Master Vault 333 evidence update",
+  "created_at_utc": "2026-07-07T08:14:05Z",
+  "updated_at_utc": "2026-07-07T08:43:21Z",
+  "chat_sequence_number": 333,
+  "assigned_by": "repository_intake",
+  "messages": [
+    {
+      "message_id": "chatgpt-uuid-or-seq",
+      "sequence_number": 1,
+      "role": "user",
+      "author": "Ben Ellis",
+      "created_at_utc": "2026-07-07T08:14:05Z",
+      "content": "prompt yourself to go into projects...",
+      "hash_sha256": "…",
+      "raw_source_ref": "export.html#line_812",
+      "flags": [
+        "evidence-relevant"
+      ]
+    },
+    {
+      "message_id": "…",
+      "sequence_number": 2,
+      "role": "assistant",
+      "author": "ChatGPT",
+      "created_at_utc": "2026-07-07T08:14:15Z",
+      "content": "…",
+      "hash_sha256": "…"
+    }
+  ],
+  "conversation_hash_sha256": "…",
+  "tags": [
+    "REXCS-333",
+    "Master Vault",
+    "evidence"
+  ],
+  "notes": "Linked to Notion page ◈ REX SOVEREIGN — MASTER CASE HUB v333",
+  "intake_notes": [
+    "Original prompt included inline comments; this normalized record stores valid JSON for repository tracking.",
+    "Placeholder ellipsis values are preserved exactly where full hashes or message bodies were not supplied."
+  ]
+}
