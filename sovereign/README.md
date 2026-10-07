@@ -30,4 +30,5 @@ docker compose up --build
 - `POST /register` — create user
 - `POST /login` — get JWT token
 - `GET /me` — retrieve current user using bearer token
+- `POST /pairing/ipad` — create a short-lived iPad pairing code using bearer token
 - `GET /health` — service health check
