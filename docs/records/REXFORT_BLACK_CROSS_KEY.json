@@ -1,0 +1,35 @@
+{
+  "record_id": "REXFORT-BLACK-CROSS-KEY-001",
+  "record_type": "user_reported_preservation_record",
+  "reported_timing": "The day he went down to see Tracy before he was arrested.",
+  "reported_function": "Locked the vault.",
+  "reported_access_condition": "Vault could not be opened unless three questions were answered.",
+  "reported_participants": [
+    "Benjamin Thomas Ellis",
+    "Tracy"
+  ],
+  "key_reference_marker": "three_and_six",
+  "do_not_record_secret_answers": true,
+  "evidence_classification": {
+    "fact": [
+      "Ben has reported the existence and purpose of the Cross Key vault-lock event."
+    ],
+    "user_reported": [
+      "The Cross Key was created on the day Ben went down to see Tracy before arrest.",
+      "The vault was locked.",
+      "Vault access required three answered questions.",
+      "The mechanism involved Ben and Tracy.",
+      "The marker 'three and six' is associated with the lock/key event."
+    ],
+    "needs_corroboration": [
+      "Exact date and time.",
+      "Vault file path or storage location.",
+      "Creation and modification timestamps.",
+      "Screenshots or logs showing lock creation.",
+      "Any code, config, iCloud, Dropbox, Git, or password-manager records tied to the lock.",
+      "Relationship between 'three and six' and the actual access mechanism."
+    ]
+  },
+  "court_safe_summary": "Ben reports that a Cross Key vault-lock mechanism was created on the day he travelled to see Tracy before his arrest. He reports that the vault could not be opened unless three questions were answered, involving both Ben and Tracy. The phrase 'three and six' is preserved as a key-reference marker. The claim requires corroboration through vault metadata, screenshots, logs, file timestamps, code/configuration records, or cloud version history.",
+  "preservation_instruction": "Do not disclose or paste the actual answers to the three questions in chat. Preserve the marker only unless working inside a secure offline vault."
+}
