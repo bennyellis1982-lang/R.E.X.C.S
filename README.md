@@ -79,6 +79,7 @@ Notes:
 
 ## REX Master Vault 333 Inventory Utility
 `tools/rex_master_vault_333.py` creates a safe review vault for REX-related files. It inventories matching files, copies them into the Master Vault 333 folder template, tags empty/generated ghost candidates, writes SHA-256 manifests, creates deletion-review receipts, and can optionally package the staged vault into a zip archive. The tool never deletes source files. It also writes a self-hydrating brain-state file, hash-chains action-log entries, emits breath events, and flags intake/automation paths that may threaten immutability.
+`tools/rex_master_vault_333.py` creates a safe review vault for REX-related files. It inventories matching files, copies them into the Master Vault 333 folder template, tags empty/generated ghost candidates, writes SHA-256 manifests, creates deletion-review receipts, and can optionally package the staged vault into a zip archive. The tool never deletes source files.
 
 Example local scan:
 ```bash

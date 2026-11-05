@@ -25,12 +25,6 @@ LOG_EXTENSIONS = {".log", ".jsonl", ".txt", ".md"}
 SOURCE_EXTENSIONS = {".py", ".sh", ".ts", ".tsx", ".sql", ".rs", ".go", ".java", ".rb"}
 JUNK_NAMES = {".ds_store", "thumbs.db", "desktop.ini"}
 GENERATED_PARTS = {"node_modules", "dist", "build", ".vite", "__pycache__", ".pytest_cache"}
-AUTOMATION_PARTS = {
-    ".github", "workflows", "launchagents", "launchdaemons", "automator",
-    "cron", "crontab", "n8n", "zapier", "make", "ifttt", "scripts",
-}
-SECRET_HINTS = {"token", "secret", "apikey", "api_key", "password", "credential", "private_key"}
-BRAIN_STATE_VERSION = "0.2.0"
 
 VAULT_FOLDERS = [
     "00_FRONT_DOOR_START_HERE",
@@ -58,8 +52,6 @@ class InventoryItem:
     sha256: str
     ghost_tag: str
     reason: str
-    immutability_risk: str
-    risk_flags: list[str]
 
 
 def utc_now() -> str:
@@ -190,6 +182,7 @@ def write_csv(path: Path, rows: list[InventoryItem]) -> None:
         writer = csv.DictWriter(csvfile, fieldnames=list(asdict(rows[0]).keys()) if rows else [
             "source_path", "relative_path", "destination_path", "bucket", "size_bytes",
             "modified_utc", "sha256", "ghost_tag", "reason", "immutability_risk", "risk_flags",
+            "modified_utc", "sha256", "ghost_tag", "reason",
         ])
         writer.writeheader()
         for row in rows:
@@ -201,60 +194,11 @@ def write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def last_action_hash(path: Path) -> str:
-    if not path.exists():
-        return "GENESIS"
-    last = ""
-    with path.open("r", encoding="utf-8") as file_obj:
-        for line in file_obj:
-            if line.strip():
-                last = line
-    if not last:
-        return "GENESIS"
-    try:
-        return str(json.loads(last).get("entry_hash", "GENESIS"))
-    except json.JSONDecodeError:
-        return "CORRUPT_PREVIOUS_LOG_ENTRY"
-
-
-def append_action_log(path: Path, event: str, payload: dict[str, object]) -> dict[str, object]:
+def append_action_log(path: Path, event: str, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    record = {"ts_utc": utc_now(), "event": event, "prev_hash": last_action_hash(path), **payload}
-    canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    record["entry_hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    record = {"ts_utc": utc_now(), "event": event, **payload}
     with path.open("a", encoding="utf-8") as file_obj:
         file_obj.write(json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n")
-    return record
-
-
-def write_brain_state(build_root: Path, roots: list[Path], mode: str, rows: list[InventoryItem]) -> Path:
-    risk_counts: dict[str, int] = {}
-    for row in rows:
-        risk_counts[row.immutability_risk] = risk_counts.get(row.immutability_risk, 0) + 1
-    state = {
-        "brain_id": "rex-master-vault-333",
-        "schema_version": BRAIN_STATE_VERSION,
-        "mode": mode,
-        "hydrated_at_utc": utc_now(),
-        "breath": {
-            "status": "alive",
-            "file_count": len(rows),
-            "immutability_risk_counts": risk_counts,
-        },
-        "watched_intake_roots": [str(root.expanduser()) for root in roots],
-        "vault_folders": VAULT_FOLDERS,
-        "immutability_guards": [
-            "never_delete_source_files",
-            "hash_every_intake",
-            "hash_chain_actions_jsonl",
-            "quarantine_ghost_candidates",
-            "flag_automation_and_sync_mutability",
-            "route_configs_to_sensitive_review",
-        ],
-    }
-    path = build_root / "00_FRONT_DOOR_START_HERE" / "rex_master_vault_brain_state.json"
-    write_json(path, state)
-    return path
 
 
 def create_zip(build_root: Path) -> Path:
@@ -286,19 +230,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     roots = [Path(root) for root in args.roots]
-    if not roots and not args.hydrate_only:
-        raise SystemExit("At least one root is required unless --hydrate-only is used.")
     build_label = args.build_label or f"BUILD_{datetime.now(timezone.utc).strftime('%Y-%m-%d_%Y%m%d_%H%M')}"
     vault_root = Path(args.vault_root).expanduser()
     build_root = vault_root / build_label
 
     for folder in VAULT_FOLDERS:
-        if not args.dry_run or args.hydrate_only:
+        if not args.dry_run:
             (build_root / folder).mkdir(parents=True, exist_ok=True)
 
     action_log = build_root / "00_FRONT_DOOR_START_HERE" / "actions.jsonl"
-    if not args.dry_run or args.hydrate_only:
-        append_action_log(action_log, "breath_started", {"roots": [str(root.expanduser()) for root in roots], "hydrate_only": args.hydrate_only})
     rows: list[InventoryItem] = []
     seen_sources: set[Path] = set()
 
@@ -313,6 +253,7 @@ def main() -> int:
         classified_bucket = classify_bucket(path)
         bucket = "10_GHOST_REX_DELETE_REVIEW" if tag != "KEEP" else classified_bucket
         risk, risk_flags = assess_immutability_risk(path, classified_bucket, tag)
+        bucket = "10_GHOST_REX_DELETE_REVIEW" if tag != "KEEP" else classify_bucket(path)
         destination = unique_destination(build_root, bucket, root, path)
         try:
             relative = str(path.relative_to(root))
@@ -386,17 +327,14 @@ def main() -> int:
     write_csv(manifest_csv, rows)
 
     zip_path = None
-    if args.zip and not args.dry_run and not args.hydrate_only:
+    if args.zip and not args.dry_run:
         zip_path = create_zip(build_root)
         append_action_log(action_log, "zip_created", {"zip_path": str(zip_path), "sha256": sha256_file(zip_path)})
-
-    if not args.dry_run or args.hydrate_only:
-        append_action_log(action_log, "breath_completed", {"file_count": len(rows), "brain_state": str(brain_state_path)})
 
     print("REX Master Vault 333 staging summary")
     print(f"- Build root: {build_root}")
     print(f"- Files inventoried: {len(rows)}")
-    print(f"- Manifest JSON: {manifest_json}")
+    print(f"- Manifest JSON: {manifest_json}<<<<<<< codex/create-self-updati")
     print(f"- Manifest CSV: {manifest_csv}")
     print(f"- Brain state: {brain_state_path}")
     print(f"- Duplicate groups: {len(duplicate_groups)}")

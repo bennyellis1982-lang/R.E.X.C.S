@@ -1,3 +1,18 @@
+# Python bytecode/cache artifacts
 __pycache__/
+*.py[cod]
+*$py.class
+
+# Local Python virtual environments
 .venv/
-*.pyc
+venv/
+env/
+ENV/
+
+# Local environment/secrets
+.env
+.env.*
+!.env.example
+
+# Local frontend dependencies
+node_modules/
