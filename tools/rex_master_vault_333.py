@@ -82,6 +82,36 @@ def is_rex_related(path: Path) -> bool:
     return REX_NEEDLE in lowered
 
 
+def assess_immutability_risk(path: Path, bucket: str, ghost: str) -> tuple[str, list[str]]:
+    """Flag intakes and automations that could harm vault immutability."""
+    lowered_parts = {part.lower() for part in path.parts}
+    lowered_path = str(path).lower()
+    flags: list[str] = []
+
+    if ghost != "KEEP":
+        flags.append(f"ghost_candidate:{ghost}")
+    if lowered_parts.intersection(AUTOMATION_PARTS):
+        flags.append("automation_or_workflow_path")
+    if any(hint in lowered_path for hint in SECRET_HINTS):
+        flags.append("possible_secret_or_credential_name")
+    if bucket == "05_CONFIG_ENV_SENSITIVE_REVIEW":
+        flags.append("configuration_requires_sensitive_review")
+    if any(part in lowered_parts for part in {"downloads", "desktop", "tmp", "temp"}):
+        flags.append("volatile_user_intake_location")
+    if "cloudstorage" in lowered_path or "google drive" in lowered_path or "dropbox" in lowered_path or "onedrive" in lowered_path:
+        flags.append("sync_provider_mutability_risk")
+    if path.suffix.lower() in {".sh", ".py", ".js", ".jsx", ".ts", ".tsx"} and lowered_parts.intersection(AUTOMATION_PARTS):
+        flags.append("executable_automation_review_required")
+
+    if any(flag.startswith("possible_secret") for flag in flags):
+        return "HIGH", flags
+    if "automation_or_workflow_path" in flags or "sync_provider_mutability_risk" in flags:
+        return "MEDIUM", flags
+    if flags:
+        return "LOW", flags
+    return "CLEAR", flags
+
+
 def classify_bucket(path: Path) -> str:
     lowered = str(path).lower()
     suffix = path.suffix.lower()
@@ -151,6 +181,7 @@ def write_csv(path: Path, rows: list[InventoryItem]) -> None:
     with path.open("w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=list(asdict(rows[0]).keys()) if rows else [
             "source_path", "relative_path", "destination_path", "bucket", "size_bytes",
+            "modified_utc", "sha256", "ghost_tag", "reason", "immutability_risk", "risk_flags",
             "modified_utc", "sha256", "ghost_tag", "reason",
         ])
         writer.writeheader()
@@ -186,12 +217,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Inventory REX files, stage a Master Vault 333 review tree, and write ghost-file receipts."
     )
-    parser.add_argument("roots", nargs="+", help="Local or synced cloud roots to scan, such as ~/Desktop ~/Downloads ~/Google Drive")
+    parser.add_argument("roots", nargs="*", help="Local or synced cloud roots to scan, such as ~/Desktop ~/Downloads ~/Google Drive")
     parser.add_argument("--vault-root", default="REX_MASTER_VAULT_333", help="Target vault folder (default: ./REX_MASTER_VAULT_333)")
     parser.add_argument("--build-label", help="Optional BUILD_* folder name. Defaults to UTC timestamp.")
     parser.add_argument("--include-all-web", action="store_true", help="Also collect HTML/JS/JSX/CSS files even if their path does not contain rex.")
     parser.add_argument("--zip", action="store_true", help="Create a zip archive under 09_ZIPS after staging.")
     parser.add_argument("--dry-run", action="store_true", help="Write manifests only; do not copy files or create zip archive.")
+    parser.add_argument("--hydrate-only", action="store_true", help="Create the vault folder tree and brain-state file without scanning files.")
     return parser.parse_args()
 
 
@@ -218,6 +250,9 @@ def main() -> int:
         stat = path.stat()
         digest = sha256_file(path)
         tag, reason = ghost_tag(path, stat.st_size)
+        classified_bucket = classify_bucket(path)
+        bucket = "10_GHOST_REX_DELETE_REVIEW" if tag != "KEEP" else classified_bucket
+        risk, risk_flags = assess_immutability_risk(path, classified_bucket, tag)
         bucket = "10_GHOST_REX_DELETE_REVIEW" if tag != "KEEP" else classify_bucket(path)
         destination = unique_destination(build_root, bucket, root, path)
         try:
@@ -234,6 +269,8 @@ def main() -> int:
             sha256=digest,
             ghost_tag=tag,
             reason=reason,
+            immutability_risk=risk,
+            risk_flags=risk_flags,
         )
         rows.append(item)
 
@@ -274,6 +311,7 @@ def main() -> int:
         "file_count": len(rows),
         "duplicate_group_count": len(duplicate_groups),
         "duplicate_groups": duplicate_groups,
+        "immutability_risk_counts": {risk: sum(1 for row in rows if row.immutability_risk == risk) for risk in sorted({row.immutability_risk for row in rows})},
         "items": [asdict(row) for row in rows],
     }
 
@@ -283,6 +321,7 @@ def main() -> int:
     if args.dry_run:
         build_root.mkdir(parents=True, exist_ok=True)
         (build_root / "00_FRONT_DOOR_START_HERE").mkdir(parents=True, exist_ok=True)
+    brain_state_path = write_brain_state(build_root, roots, "hydrate_only" if args.hydrate_only else "scan", rows)
     write_json(manifest_json, manifest_payload)
     write_json(duplicates_json, {"generated_at_utc": utc_now(), "duplicate_groups": duplicate_groups})
     write_csv(manifest_csv, rows)
@@ -295,8 +334,9 @@ def main() -> int:
     print("REX Master Vault 333 staging summary")
     print(f"- Build root: {build_root}")
     print(f"- Files inventoried: {len(rows)}")
-    print(f"- Manifest JSON: {manifest_json}")
+    print(f"- Manifest JSON: {manifest_json}<<<<<<< codex/create-self-updati")
     print(f"- Manifest CSV: {manifest_csv}")
+    print(f"- Brain state: {brain_state_path}")
     print(f"- Duplicate groups: {len(duplicate_groups)}")
     if zip_path:
         print(f"- Zip archive: {zip_path}")

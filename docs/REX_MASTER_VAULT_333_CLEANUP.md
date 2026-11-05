@@ -84,3 +84,29 @@ Use dry-run mode to test inventory behavior without copying files or creating a 
 ```bash
 python3 tools/rex_master_vault_333.py . --vault-root /tmp/REX_MASTER_VAULT_333 --dry-run
 ```
+
+## Hardened Brain-State Hydration and Breathing
+
+The utility now self-hydrates each build by writing `rex_master_vault_brain_state.json` into `00_FRONT_DOOR_START_HERE/`. This state file records the vault schema version, watched intake roots, current breath status, file counts, immutability-risk counts, vault folders, and active immutability guards.
+
+Each non-dry run also breathes into `actions.jsonl` with `breath_started` and `breath_completed` events. Every action-log entry includes a previous hash and an entry hash, creating a hash-chained audit trail for copied files, zip creation, and heartbeat-style run status.
+
+Use hydration mode to create the folder tree and brain-state contract before scanning any user files:
+
+```bash
+python3 tools/rex_master_vault_333.py \
+  --vault-root /Volumes/OneTouch/REX_MASTER_VAULT_333 \
+  --hydrate-only
+```
+
+## Intake and Automation Risk Awareness
+
+Inventory rows now include `immutability_risk` and `risk_flags`. The tool flags intakes that can threaten immutability or confuse custody, including:
+
+- automation and workflow paths such as `.github/workflows`, `launchagents`, `automator`, `cron`, `n8n`, `zapier`, and script folders;
+- volatile intake locations such as Desktop, Downloads, temp folders, and sync-provider folders;
+- configuration and credential-looking filenames;
+- generated/cache/build directories;
+- zero-byte ghost candidates and OS junk.
+
+Risk flags do not prove wrongdoing. They are review signals so REX can remain aware of the user's environment without deleting or mutating source material.
